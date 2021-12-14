@@ -121,7 +121,7 @@ fn main() {
     }
 
     let mut all_backtraces: HashSet<String> = HashSet::new();
-    for keys in backtrace_map {
+    for keys in backtrace_map.iter() {
         all_backtraces.extend(keys.keys().cloned());
     }
 
@@ -132,17 +132,16 @@ fn main() {
     // variable allocations - with no common pattern.
     let mut variable_backtraces = Vec::new();
 
-    println!("Max count 0 means that no common allocations were ever found. So, not a leak.");
-
-    // only printing allocations which are common in all and increasing.
-    for k in all_backtraces {
+    let mut missing_keys: HashMap<String, usize> = HashMap::new();
+    // get allocation in differet buckets.
+    for k in all_backtraces.iter() {
         let mut last_count = 0;
         let mut is_variable = false;
         let mut is_static = true;
         let mut not_present = false;
 
         for c_a in allocations_diff.iter() {
-            if let Some(allocs) = c_a.get(&k) {
+            if let Some(allocs) = c_a.get(k) {
                 if allocs.len() >= last_count {
                     if (last_count != 0) && (allocs.len() != last_count) {
                         is_static = false;
@@ -158,7 +157,7 @@ fn main() {
 
         // trace only if present in only few files
         if not_present {
-            println!("For Key {}, there are no common allocations later in umdh txt files. Max count : {}", k, last_count);
+            missing_keys.insert(k.clone(), last_count);
             continue;
         }
 
@@ -171,14 +170,53 @@ fn main() {
         }
     }
 
+    let mut leaked_allocations: HashMap<String, HashSet<i64>> = HashMap::new();
+    // find allocations which are common in all.
+    for k in all_backtraces.iter() {
+        let mut present = true;
+        let mut current_set = HashSet::new();
+        if backtrace_map[0].contains_key(k) {
+            current_set = backtrace_map[0].get(k).unwrap().clone();
+        } else {
+            continue;
+        }
+
+        for bk in backtrace_map.iter().skip(1) {
+            if !bk.contains_key(k) {
+                present = false;
+                break;
+            }
+
+            current_set = bk[k].intersection(&current_set).cloned().collect::<HashSet<i64>>();
+
+            if current_set.len() == 0 {
+                present = false;
+                break;
+            }
+        }
+
+        if present {
+            leaked_allocations.insert(k.clone(), current_set);
+        }
+    }
+
     println!("Potential Leaked allocations:");
     print_allocations(leaked_backtraces, &allocations_diff);
     println!("Potential Variable allocations:");
     print_allocations(variable_backtraces, &allocations_diff);
+
+    println!("Allocations that never changed address:");
+    let mut leaked_allocations_vec: Vec<String> = leaked_allocations.keys().cloned().collect::<Vec<String>>();
+    leaked_allocations_vec.sort_by(|a, b| leaked_allocations[a].len().cmp(&leaked_allocations[b].len()).reverse());
+    for k in leaked_allocations_vec {
+        println!("{},{} => {:?}", k, leaked_allocations[&k].len(), leaked_allocations[&k]);
+    }
+
     println!("Static allocations:");
     print_allocations(static_backtraces, &allocations_diff);
 
+    println!("BackTraces which are definitely not leaking as they were not present in some umdh file");
+    println!("{:?}", missing_keys);
+    println!("Allocations of last diff");
     println!("{:?}", allocations_diff.last().unwrap());
-
-    println!("Potential leaked allocations");
 }
