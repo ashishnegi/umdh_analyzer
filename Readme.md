@@ -36,21 +36,21 @@ It flags those BackTrace*.
 2. Pass umdh files to tool in order of oldest to recent log file.
 ```
 > cargo run --release -- .\Umdh_202112071000.txt .\Umdh_202112071530.txt .\Umdh_202112081230.txt .\Umdh_202112091040.txt 
-Potential Leaked allocations:
-Common backtraces in order of highest numbers:
+Potential Leaked allocations as these allocations always kept increasing:
+Common allocations: [1st..Last],[2nd..Last],[3rd..Last],..,BackTrace*
 310,312,1999,BackTrace648E5887
 54,56,64,BackTraceF832203
 49,49,50,BackTraceF950D83
-33,33,41,BackTrace5DEC6F47
 33,33,41,BackTrace5DEC6B07
+33,33,41,BackTrace5DEC6F47
 33,33,40,BackTrace5DEC6847
 21,21,28,BackTrace5DEC70C7
 15,15,21,BackTrace5DEC7247
 18,18,20,BackTrace5DEC6C87
 1,10,10,BackTrace64B6FB07
 1,3,5,BackTrace6232AA87
-Potential Variable allocations:
-Common backtraces in order of highest numbers:
+Variable allocations: [Count increased and decreased with time] / Can be waiting on some workflow like GC to deallocate these
+Common allocations: [1st..Last],[2nd..Last],[3rd..Last],..,BackTrace*
 15,13,33,BackTrace6E4817C7
 3,38,31,BackTrace6762DE07
 3,28,26,BackTrace6762A307
