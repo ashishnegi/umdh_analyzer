@@ -88,8 +88,8 @@ fn find_common_allocations(
     common_allocations
 }
 
-fn print_allocations(mut keys: Vec<String>, allocations_diff: &Vec<BackTraceMap>) {
-    let common_allocations = allocations_diff.last().unwrap();
+fn print_allocations(mut keys: Vec<String>, allocation_diffs: &Vec<BackTraceMap>) {
+    let common_allocations = allocation_diffs.last().unwrap();
     keys.sort_by(|a, b| {
         common_allocations[a]
             .len()
@@ -97,9 +97,9 @@ fn print_allocations(mut keys: Vec<String>, allocations_diff: &Vec<BackTraceMap>
             .reverse()
     });
 
-    println!("Common backtraces in order of highest numbers:");
+    println!("Common allocations: [1st..Last],[2nd..Last],[3rd..Last],..,BackTrace*");
     for key in keys {
-        for c_a in allocations_diff {
+        for c_a in allocation_diffs {
             if let Some(allocs) = c_a.get(&key) {
                 print!("{:?},", allocs.len())
             } else {
@@ -121,6 +121,15 @@ fn parse_umdh_files(file_names: &[String]) -> Vec<BackTraceMap> {
     backtrace_maps
 }
 
+fn get_all_backtraces(backtrace_maps: &Vec<BackTraceMap>) -> Vec<String> {
+    let mut all_backtraces_set: HashSet<String> = HashSet::new();
+    for keys in backtrace_maps.iter() {
+        all_backtraces_set.extend(keys.keys().cloned());
+    }
+
+    all_backtraces_set.iter().cloned().collect::<Vec<String>>()
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -135,23 +144,14 @@ fn main() {
     let num_files = args.len() - 1;
 
     let backtrace_maps = parse_umdh_files(&args[1..]);
+    let all_backtraces = get_all_backtraces(&backtrace_maps);
+    let allocation_diffs = backtrace_maps
+        .iter()
+        .take(backtrace_maps.len() - 1)
+        .map(|m| find_common_allocations(&all_backtraces, &vec![m, backtrace_maps.last().unwrap()]))
+        .collect::<Vec<BackTraceMap>>();
 
-    let mut all_backtraces_set: HashSet<String> = HashSet::new();
-    for keys in backtrace_maps.iter() {
-        all_backtraces_set.extend(keys.keys().cloned());
-    }
-
-    let all_backtraces = all_backtraces_set.iter().cloned().collect::<Vec<String>>();
-
-    let mut allocations_diff = Vec::new();
-    for i in 0..backtrace_maps.len() - 1 {
-        allocations_diff.push(find_common_allocations(
-            &all_backtraces,
-            &vec![&backtrace_maps[i], &backtrace_maps[backtrace_maps.len() - 1]],
-        ));
-    }
-
-    if allocations_diff.len() != num_files - 1 {
+    if allocation_diffs.len() != num_files - 1 {
         panic!("unexpected allocation diff count")
     }
 
@@ -170,7 +170,7 @@ fn main() {
         let mut is_static = true;
         let mut not_present = false;
 
-        for c_a in allocations_diff.iter() {
+        for c_a in allocation_diffs.iter() {
             if let Some(allocs) = c_a.get(k) {
                 if allocs.len() >= last_count {
                     if (last_count != 0) && (allocs.len() != last_count) {
@@ -200,43 +200,45 @@ fn main() {
         }
     }
 
-    let leaked_allocations = find_common_allocations(
+    println!("Potential Leaked allocations as these allocations always kept increasing:");
+    print_allocations(leaked_backtraces, &allocation_diffs);
+
+    println!("Variable allocations: [Count increased and decreased with time] / Can be waiting on some workflow like GC to deallocate these");
+    print_allocations(variable_backtraces, &allocation_diffs);
+
+    println!("Allocations that never changed address: Sorted by count: [These can be global or leaked allocations]");
+    let always_present_allocations = find_common_allocations(
         &all_backtraces,
-        &backtrace_maps
-            .iter()
-            .collect::<Vec<&BackTraceMap>>(),
+        &backtrace_maps.iter().collect::<Vec<&BackTraceMap>>(),
     );
-
-    println!("Potential Leaked allocations:");
-    print_allocations(leaked_backtraces, &allocations_diff);
-    println!("Potential Variable allocations:");
-    print_allocations(variable_backtraces, &allocations_diff);
-
-    println!("Allocations that never changed address:");
-    let mut leaked_allocations_vec: Vec<String> =
-        leaked_allocations.keys().cloned().collect::<Vec<String>>();
-    leaked_allocations_vec.sort_by(|a, b| {
-        leaked_allocations[a]
+    let mut always_present_allocations_vec: Vec<String> = always_present_allocations
+        .keys()
+        .cloned()
+        .collect::<Vec<String>>();
+    always_present_allocations_vec.sort_by(|a, b| {
+        always_present_allocations[a]
             .len()
-            .cmp(&leaked_allocations[b].len())
+            .cmp(&always_present_allocations[b].len())
             .reverse()
     });
-    for k in leaked_allocations_vec {
-        println!(
-            "{},{} => {:?}",
-            k,
-            leaked_allocations[&k].len(),
-            leaked_allocations[&k]
-        );
+    for k in always_present_allocations_vec {
+        if always_present_allocations[&k].len() > 1 {
+            println!(
+                "{},{} => {:?}",
+                k,
+                always_present_allocations[&k].len(),
+                always_present_allocations[&k]
+            );
+        }
     }
 
-    println!("Static allocations:");
-    print_allocations(static_backtraces, &allocations_diff);
+    println!("Static allocations: [Count never changed]");
+    print_allocations(static_backtraces, &allocation_diffs);
 
     println!(
         "BackTraces which are definitely not leaking as they were not present in some umdh file"
     );
     println!("{:?}", missing_keys);
     println!("Allocations of last diff");
-    println!("{:?}", allocations_diff.last().unwrap());
+    println!("{:?}", allocation_diffs.last().unwrap());
 }
