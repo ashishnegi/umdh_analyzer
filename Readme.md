@@ -32,7 +32,7 @@ Tool also looks at if there are increasing count of "potential leaks" with new u
 It flags those BackTrace*.
 
 ## How to run tool:
-1. Take multile UMDH snapshots. Read [here]() on how to enable UMDH.
+1. Take multile UMDH snapshots. Read [here](https://docs.microsoft.com/en-us/windows-hardware/drivers/debugger/preparing-to-use-umdh) on how to enable UMDH.
 2. Pass umdh files to tool in order of oldest to recent log file.
 ```
 > cargo run --release -- .\Umdh_202112071000.txt .\Umdh_202112071530.txt .\Umdh_202112081230.txt .\Umdh_202112091040.txt 
