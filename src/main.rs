@@ -4,14 +4,16 @@ use std::io::{BufRead, Error};
 use std::path::Path;
 use std::{env, io};
 
-fn parse_umdh_file(file_name: &String) -> Result<HashMap<String, HashSet<i64>>, Error> {
+type BackTraceMap = HashMap<String, HashSet<i64>>;
+
+fn parse_umdh_file(file_name: &String) -> Result<BackTraceMap, Error> {
     let path = Path::new(&file_name);
 
     // Open the path in read-only mode, returns `io::Result<File>`
     let file = File::open(&path)?;
     let lines = io::BufReader::new(file).lines();
 
-    let mut backtrace_addresses: HashMap<String, HashSet<i64>> = HashMap::new();
+    let mut backtrace_addresses: BackTraceMap = HashMap::new();
 
     for op_line in lines {
         let line = op_line?;
@@ -49,20 +51,20 @@ fn parse_umdh_file(file_name: &String) -> Result<HashMap<String, HashSet<i64>>, 
 
 fn find_common_allocations(
     all_backtraces: &Vec<String>,
-    backtrace_map: &Vec<&HashMap<String, HashSet<i64>>>,
-) -> HashMap<String, HashSet<i64>> {
-    let mut common_allocations: HashMap<String, HashSet<i64>> = HashMap::new();
+    backtrace_maps: &Vec<&BackTraceMap>,
+) -> BackTraceMap {
+    let mut common_allocations: BackTraceMap = HashMap::new();
     // find allocations which are common in all.
     for k in all_backtraces.iter() {
         let mut present = true;
         let mut current_set = HashSet::new();
-        if backtrace_map[0].contains_key(k) {
-            current_set = backtrace_map[0].get(k).unwrap().clone();
+        if backtrace_maps[0].contains_key(k) {
+            current_set = backtrace_maps[0].get(k).unwrap().clone();
         } else {
             continue;
         }
 
-        for bk in backtrace_map.iter().skip(1) {
+        for bk in backtrace_maps.iter().skip(1) {
             if !bk.contains_key(k) {
                 present = false;
                 break;
@@ -86,7 +88,7 @@ fn find_common_allocations(
     common_allocations
 }
 
-fn print_allocations(mut keys: Vec<String>, allocations_diff: &Vec<HashMap<String, HashSet<i64>>>) {
+fn print_allocations(mut keys: Vec<String>, allocations_diff: &Vec<BackTraceMap>) {
     let common_allocations = allocations_diff.last().unwrap();
     keys.sort_by(|a, b| {
         common_allocations[a]
@@ -109,12 +111,22 @@ fn print_allocations(mut keys: Vec<String>, allocations_diff: &Vec<HashMap<Strin
     }
 }
 
+fn parse_umdh_files(file_names: &[String]) -> Vec<BackTraceMap> {
+    let mut backtrace_maps: Vec<BackTraceMap> = Vec::new();
+
+    for umdh_file in file_names {
+        backtrace_maps.push(parse_umdh_file(&umdh_file).unwrap());
+    }
+
+    backtrace_maps
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 3 {
         println!(
-            "Usage: cargo run -- umdh_file_path1 umdh_file_path2 \n
+            "Usage: cargo run -- umdh_file_path1 umdh_file_path2  umdh_file_path3\n
                  File paths in order of oldest to latest."
         );
         return;
@@ -122,24 +134,20 @@ fn main() {
 
     let num_files = args.len() - 1;
 
-    let mut backtrace_map: Vec<HashMap<String, HashSet<i64>>> = Vec::new();
-
-    for umdh_file in args.iter().skip(1) {
-        backtrace_map.push(parse_umdh_file(&umdh_file).unwrap());
-    }
+    let backtrace_maps = parse_umdh_files(&args[1..]);
 
     let mut all_backtraces_set: HashSet<String> = HashSet::new();
-    for keys in backtrace_map.iter() {
+    for keys in backtrace_maps.iter() {
         all_backtraces_set.extend(keys.keys().cloned());
     }
 
     let all_backtraces = all_backtraces_set.iter().cloned().collect::<Vec<String>>();
 
     let mut allocations_diff = Vec::new();
-    for i in 0..backtrace_map.len() - 1 {
+    for i in 0..backtrace_maps.len() - 1 {
         allocations_diff.push(find_common_allocations(
             &all_backtraces,
-            &vec![&backtrace_map[i], &backtrace_map[backtrace_map.len() - 1]],
+            &vec![&backtrace_maps[i], &backtrace_maps[backtrace_maps.len() - 1]],
         ));
     }
 
@@ -194,9 +202,9 @@ fn main() {
 
     let leaked_allocations = find_common_allocations(
         &all_backtraces,
-        &backtrace_map
+        &backtrace_maps
             .iter()
-            .collect::<Vec<&HashMap<String, HashSet<i64>>>>(),
+            .collect::<Vec<&BackTraceMap>>(),
     );
 
     println!("Potential Leaked allocations:");
