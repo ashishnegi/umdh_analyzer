@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, Error};
@@ -31,6 +32,11 @@ fn parse_umdh_file(file_name: &String) -> Result<BacktraceAllocationsMap, Error>
             let mut address_end_pos = address_start_pos;
             while address_end_pos < line.len() && line_str[address_end_pos] != b' ' {
                 address_end_pos += 1;
+            }
+
+            if address_end_pos + 4 + 9  > line.len() {
+                // 4 for " by ", 9 for "BackTrace "
+                continue; // bad format line ?
             }
 
             let address = match i64::from_str_radix(&line[address_start_pos..address_end_pos], 16) {
@@ -95,26 +101,38 @@ fn find_common_allocations<'a>(
     common_allocations
 }
 
-fn print_allocations(keys: &mut Vec<&String>, allocation_diffs: &Vec<BacktraceRefAllocationsMap>) {
+fn print_allocations(backtraces: &mut Vec<&String>, allocation_diffs: &Vec<BacktraceRefAllocationsMap>) {
     let common_allocations = allocation_diffs.last().unwrap();
-    keys.sort_by(|a, b| {
-        common_allocations[*a]
+    backtraces.sort_by(|a, b| {
+        let a_present = common_allocations.contains_key(*a);
+        let b_present = common_allocations.contains_key(*b);
+        if a_present && b_present {
+            // this allocation type is present in last dump
+            common_allocations[*a]
             .len()
             .cmp(&common_allocations[*b].len())
             .reverse()
+        } else if !a_present && !b_present {
+            // both are not present : sort by name itself.
+            a.cmp(b).reverse()
+        } else if a_present {
+            Ordering::Greater
+        } else {
+            Ordering::Less
+        }
     });
 
     println!("Common allocations: [1st..Last],[2nd..Last],[3rd..Last],..,BackTrace*");
-    for key in keys {
+    for backtrace in backtraces {
         for c_a in allocation_diffs {
-            if let Some(allocs) = c_a.get(*key) {
+            if let Some(allocs) = c_a.get(*backtrace) {
                 print!("{:?},", allocs.len())
             } else {
                 print!(",")
             }
         }
 
-        println!("{}", key);
+        println!("{}", backtrace);
     }
 }
 
