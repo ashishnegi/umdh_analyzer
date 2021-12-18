@@ -5,6 +5,7 @@ use std::path::Path;
 use std::{env, io};
 
 type BackTraceMap = HashMap<String, HashSet<i64>>;
+type BackTraceRefMap<'a> = HashMap<&'a String, HashSet<i64>>;
 
 fn parse_umdh_file(file_name: &String) -> Result<BackTraceMap, Error> {
     let path = Path::new(&file_name);
@@ -49,28 +50,33 @@ fn parse_umdh_file(file_name: &String) -> Result<BackTraceMap, Error> {
     Ok(backtrace_addresses)
 }
 
-fn find_common_allocations(
-    all_backtraces: &Vec<String>,
-    backtrace_maps: &Vec<&BackTraceMap>,
-) -> BackTraceMap {
-    let mut common_allocations: BackTraceMap = HashMap::new();
+fn find_common_allocations<'a>(
+    all_backtraces: &'a Vec<&String>,
+    backtrace_maps: &Vec<&'a BackTraceMap>,
+) -> BackTraceRefMap<'a> {
+    let mut common_allocations: BackTraceRefMap = HashMap::new();
     // find allocations which are common in all.
     for k in all_backtraces.iter() {
         let mut present = true;
-        if !backtrace_maps[0].contains_key(k) {
-            continue;
-        }
 
-        // Todo: for clone: instead of HashSet, i want Intersection<i64> to reuse and then finally, collect the smallest set;
-        let mut current_set = backtrace_maps[0].get(k).unwrap().clone();
-
-        for bk in backtrace_maps.iter().skip(1) {
-            if !bk.contains_key(k) {
+        // Is this BackTrace present in all log files ?
+        for bk in backtrace_maps.iter() {
+            if !bk.contains_key(*k) {
                 present = false;
                 break;
             }
+        }
 
-            current_set = bk[k]
+        if !present {
+            continue;
+        }
+
+        let mut current_set = backtrace_maps[0].get(*k).unwrap()
+            .intersection(backtrace_maps[1].get(*k).unwrap()).cloned().collect::<HashSet<i64>>();
+
+        for bk in backtrace_maps.iter().skip(2) {
+            // there is no easy (right?) way to iterate over HashSet and also remove from it;
+            current_set = bk[*k]
                 .intersection(&current_set)
                 .cloned()
                 .collect::<HashSet<i64>>();
@@ -82,13 +88,13 @@ fn find_common_allocations(
         }
 
         if present {
-            common_allocations.insert(k.clone(), current_set);
+            common_allocations.insert(k, current_set);
         }
     }
     common_allocations
 }
 
-fn print_allocations(keys: &mut Vec<&String>, allocation_diffs: &Vec<BackTraceMap>) {
+fn print_allocations(keys: &mut Vec<&String>, allocation_diffs: &Vec<BackTraceRefMap>) {
     let common_allocations = allocation_diffs.last().unwrap();
     keys.sort_by(|a, b| {
         common_allocations[*a]
@@ -121,13 +127,14 @@ fn parse_umdh_files(file_names: &[String]) -> Vec<BackTraceMap> {
     backtrace_maps
 }
 
-fn get_all_backtraces(backtrace_maps: &Vec<BackTraceMap>) -> Vec<String> {
+fn get_all_backtraces(backtrace_maps: &Vec<BackTraceMap>) -> Vec<&String> {
     let mut all_backtraces_set: HashSet<&String> = HashSet::new();
     for keys in backtrace_maps.iter() {
         all_backtraces_set.extend(keys.keys());
     }
 
-    all_backtraces_set.iter().cloned().cloned().collect::<Vec<String>>()
+    // i believe this cloned() is not costly as it is converting from &&String to &String.
+    all_backtraces_set.iter().cloned().collect::<Vec<&String>>()
 }
 
 fn main() {
@@ -149,7 +156,7 @@ fn main() {
         .iter()
         .take(backtrace_maps.len() - 1)
         .map(|m| find_common_allocations(&all_backtraces, &vec![m, backtrace_maps.last().unwrap()]))
-        .collect::<Vec<BackTraceMap>>();
+        .collect::<Vec<BackTraceRefMap>>();
 
     if allocation_diffs.len() != num_files - 1 {
         panic!("unexpected allocation diff count")
@@ -211,13 +218,13 @@ fn main() {
         &all_backtraces,
         &backtrace_maps.iter().collect::<Vec<&BackTraceMap>>(),
     );
-    let mut always_present_allocations_vec: Vec<&String> = always_present_allocations
+    let mut always_present_allocations_vec: Vec<&&String> = always_present_allocations
         .keys()
-        .collect::<Vec<&String>>();
+        .collect::<Vec<&&String>>();
     always_present_allocations_vec.sort_by(|a, b| {
-        always_present_allocations[*a]
+        always_present_allocations[**a]
             .len()
-            .cmp(&always_present_allocations[*b].len())
+            .cmp(&always_present_allocations[**b].len())
             .reverse()
     });
     for k in always_present_allocations_vec {
