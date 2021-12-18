@@ -8,7 +8,7 @@ use std::{env, io};
 type BacktraceAllocationsMap = HashMap<String, HashSet<i64>>;
 type BacktraceRefAllocationsMap<'a> = HashMap<&'a String, HashSet<i64>>;
 
-fn parse_umdh_file(file_name: &String) -> Result<BacktraceAllocationsMap, Error> {
+fn parse_umdh_file(file_name: &str) -> Result<BacktraceAllocationsMap, Error> {
     let path = Path::new(&file_name);
 
     // Open the path in read-only mode, returns `io::Result<File>`
@@ -49,7 +49,7 @@ fn parse_umdh_file(file_name: &String) -> Result<BacktraceAllocationsMap, Error>
 
             backtrace_addresses
                 .entry(backtrace)
-                .or_insert(HashSet::new())
+                .or_insert_with(HashSet::new)
                 .insert(address);
         }
     }
@@ -58,8 +58,8 @@ fn parse_umdh_file(file_name: &String) -> Result<BacktraceAllocationsMap, Error>
 }
 
 fn find_common_allocations<'a>(
-    all_backtraces: &'a Vec<&String>,
-    backtrace_maps: &Vec<&'a BacktraceAllocationsMap>,
+    all_backtraces: &'a [&String],
+    backtrace_maps: &[&'a BacktraceAllocationsMap],
 ) -> BacktraceRefAllocationsMap<'a> {
     let mut common_allocations: BacktraceRefAllocationsMap = HashMap::new();
     // find allocations which are common in all.
@@ -88,7 +88,7 @@ fn find_common_allocations<'a>(
                 .cloned()
                 .collect::<HashSet<i64>>();
 
-            if current_set.len() == 0 {
+            if current_set.is_empty() {
                 present = false;
                 break;
             }
@@ -101,7 +101,7 @@ fn find_common_allocations<'a>(
     common_allocations
 }
 
-fn print_allocations(backtraces: &mut Vec<&String>, allocation_diffs: &Vec<BacktraceRefAllocationsMap>) {
+fn print_allocations(backtraces: &mut Vec<&String>, allocation_diffs: &[BacktraceRefAllocationsMap]) {
     let common_allocations = allocation_diffs.last().unwrap();
     backtraces.sort_by(|a, b| {
         let a_present = common_allocations.contains_key(*a);
@@ -140,13 +140,13 @@ fn parse_umdh_files(file_names: &[String]) -> Vec<BacktraceAllocationsMap> {
     let mut backtrace_maps: Vec<BacktraceAllocationsMap> = Vec::new();
 
     for umdh_file in file_names {
-        backtrace_maps.push(parse_umdh_file(&umdh_file).unwrap());
+        backtrace_maps.push(parse_umdh_file(umdh_file).unwrap());
     }
 
     backtrace_maps
 }
 
-fn get_all_backtraces(backtrace_maps: &Vec<BacktraceAllocationsMap>) -> Vec<&String> {
+fn get_all_backtraces(backtrace_maps: &[BacktraceAllocationsMap]) -> Vec<&String> {
     let mut all_backtraces_set: HashSet<&String> = HashSet::new();
     for keys in backtrace_maps.iter() {
         all_backtraces_set.extend(keys.keys());
@@ -174,7 +174,7 @@ fn main() {
     let allocation_diffs = backtrace_maps
         .iter()
         .take(backtrace_maps.len() - 1)
-        .map(|m| find_common_allocations(&all_backtraces, &vec![m, backtrace_maps.last().unwrap()]))
+        .map(|m| find_common_allocations(&all_backtraces, &[m, backtrace_maps.last().unwrap()]))
         .collect::<Vec<BacktraceRefAllocationsMap>>();
 
     if allocation_diffs.len() != num_files - 1 {
