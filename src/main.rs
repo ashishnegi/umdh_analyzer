@@ -16,28 +16,29 @@ fn parse_umdh_file(file_name: &String) -> Result<BacktraceAllocationsMap, Error>
 
     let mut backtrace_addresses: BacktraceAllocationsMap = HashMap::new();
 
-    for op_line in lines {
-        let line = op_line?;
+    for line_res in lines {
+        let line = line_res?;
+        // Format of line:
+        // 30 bytes + 30 at 1E30F1B0770 by BackTraceF076263
         if line.contains("BackTrace") {
             let at_pos = line.find("at ");
             if at_pos.is_none() {
                 continue;
             }
 
-            let address_pos = at_pos.unwrap() + 3;
-            // would have liked no allocation
-            let address_str: String = line
-                .chars()
-                .skip(address_pos)
-                .take_while(|c| *c != ' ')
-                .collect();
+            let address_start_pos = at_pos.unwrap() + 3;
+            let line_str = line.as_bytes();
+            let mut address_end_pos = address_start_pos;
+            while address_end_pos < line.len() && line_str[address_end_pos] != b' ' {
+                address_end_pos += 1;
+            }
 
-            let address = match i64::from_str_radix(&address_str, 16) {
+            let address = match i64::from_str_radix(&line[address_start_pos..address_end_pos], 16) {
                 Ok(address) => address,
                 Err(_) => continue,
             };
 
-            let backtrace_pos = address_pos + address_str.len() + " by ".len();
+            let backtrace_pos = address_end_pos + 4; //4 == " by ".len();
             let backtrace = String::from(&line[backtrace_pos..line.len()]);
 
             backtrace_addresses
@@ -59,7 +60,7 @@ fn find_common_allocations<'a>(
     for k in all_backtraces.iter() {
         let mut present = true;
 
-        // Is this BackTrace present in all log files ?
+        // Is this BackTrace present in all log files ? if not, skip costly set intersections
         for bk in backtrace_maps.iter() {
             if !bk.contains_key(*k) {
                 present = false;
