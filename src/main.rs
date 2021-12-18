@@ -57,12 +57,12 @@ fn find_common_allocations(
     // find allocations which are common in all.
     for k in all_backtraces.iter() {
         let mut present = true;
-        let mut current_set = HashSet::new();
-        if backtrace_maps[0].contains_key(k) {
-            current_set = backtrace_maps[0].get(k).unwrap().clone();
-        } else {
+        if !backtrace_maps[0].contains_key(k) {
             continue;
         }
+
+        // Todo: for clone: instead of HashSet, i want Intersection<i64> to reuse and then finally, collect the smallest set;
+        let mut current_set = backtrace_maps[0].get(k).unwrap().clone();
 
         for bk in backtrace_maps.iter().skip(1) {
             if !bk.contains_key(k) {
@@ -122,12 +122,12 @@ fn parse_umdh_files(file_names: &[String]) -> Vec<BackTraceMap> {
 }
 
 fn get_all_backtraces(backtrace_maps: &Vec<BackTraceMap>) -> Vec<String> {
-    let mut all_backtraces_set: HashSet<String> = HashSet::new();
+    let mut all_backtraces_set: HashSet<&String> = HashSet::new();
     for keys in backtrace_maps.iter() {
-        all_backtraces_set.extend(keys.keys().cloned());
+        all_backtraces_set.extend(keys.keys());
     }
 
-    all_backtraces_set.iter().cloned().collect::<Vec<String>>()
+    all_backtraces_set.iter().cloned().cloned().collect::<Vec<String>>()
 }
 
 fn main() {
@@ -211,23 +211,22 @@ fn main() {
         &all_backtraces,
         &backtrace_maps.iter().collect::<Vec<&BackTraceMap>>(),
     );
-    let mut always_present_allocations_vec: Vec<String> = always_present_allocations
+    let mut always_present_allocations_vec: Vec<&String> = always_present_allocations
         .keys()
-        .cloned()
-        .collect::<Vec<String>>();
+        .collect::<Vec<&String>>();
     always_present_allocations_vec.sort_by(|a, b| {
-        always_present_allocations[a]
+        always_present_allocations[*a]
             .len()
-            .cmp(&always_present_allocations[b].len())
+            .cmp(&always_present_allocations[*b].len())
             .reverse()
     });
     for k in always_present_allocations_vec {
-        if always_present_allocations[&k].len() > 1 {
+        if always_present_allocations[k].len() > 1 {
             println!(
                 "{},{} => {:?}",
                 k,
-                always_present_allocations[&k].len(),
-                always_present_allocations[&k]
+                always_present_allocations[k].len(),
+                always_present_allocations[k]
             );
         }
     }
