@@ -6,13 +6,11 @@ use std::path::Path;
 use std::{env, io};
 
 type BacktraceAllocationsMap = HashMap<String, HashSet<i64>>;
-type BacktraceRefAllocationsMap<'a> = HashMap<&'a String, HashSet<i64>>;
+type BacktraceRefAllocationsMap<'a> = HashMap<&'a str, HashSet<i64>>;
 
-fn parse_umdh_file(file_name: &str) -> Result<BacktraceAllocationsMap, Error> {
-    let path = Path::new(&file_name);
-
+fn parse_umdh_file(file_name: &Path) -> Result<BacktraceAllocationsMap, Error> {
     // Open the path in read-only mode, returns `io::Result<File>`
-    let file = File::open(&path)?;
+    let file = File::open(file_name)?;
     let lines = io::BufReader::new(file).lines();
 
     let mut backtrace_addresses: BacktraceAllocationsMap = HashMap::new();
@@ -45,7 +43,7 @@ fn parse_umdh_file(file_name: &str) -> Result<BacktraceAllocationsMap, Error> {
             };
 
             let backtrace_pos = address_end_pos + 4; //4 == " by ".len();
-            let backtrace = String::from(&line[backtrace_pos..line.len()]);
+            let backtrace = line[backtrace_pos..].to_string();
 
             backtrace_addresses
                 .entry(backtrace)
@@ -58,23 +56,15 @@ fn parse_umdh_file(file_name: &str) -> Result<BacktraceAllocationsMap, Error> {
 }
 
 fn find_common_allocations<'a>(
-    all_backtraces: &'a [&String],
+    all_backtraces: &'a [&str],
     backtrace_maps: &[&'a BacktraceAllocationsMap],
 ) -> BacktraceRefAllocationsMap<'a> {
     let mut common_allocations: BacktraceRefAllocationsMap = HashMap::new();
     // find allocations which are common in all.
     for k in all_backtraces.iter() {
-        let mut present = true;
-
-        // Is this BackTrace present in all log files ? if not, skip costly set intersections
-        for bk in backtrace_maps.iter() {
-            if !bk.contains_key(*k) {
-                present = false;
-                break;
-            }
-        }
-
-        if !present {
+        let in_all_log_files = backtrace_maps.iter().all(|bm| bm.contains_key(*k));
+        if !in_all_log_files {
+            // Is this BackTrace present in all log files ? if not, skip costly set intersections
             continue;
         }
 
@@ -89,19 +79,18 @@ fn find_common_allocations<'a>(
                 .collect::<HashSet<i64>>();
 
             if current_set.is_empty() {
-                present = false;
                 break;
             }
         }
 
-        if present {
+        if !current_set.is_empty() {
             common_allocations.insert(k, current_set);
         }
     }
     common_allocations
 }
 
-fn print_allocations(backtraces: &mut Vec<&String>, allocation_diffs: &[BacktraceRefAllocationsMap]) {
+fn sort_by_increasing_count(backtraces: &mut Vec<&str>, allocation_diffs: &[BacktraceRefAllocationsMap]) {
     let common_allocations = allocation_diffs.last().unwrap();
     backtraces.sort_by(|a, b| {
         let a_present = common_allocations.contains_key(*a);
@@ -121,7 +110,9 @@ fn print_allocations(backtraces: &mut Vec<&String>, allocation_diffs: &[Backtrac
             Ordering::Less
         }
     });
+}
 
+fn print_allocations(backtraces: &Vec<&str>, allocation_diffs: &[BacktraceRefAllocationsMap]) {
     println!("Common allocations: [1st..Last],[2nd..Last],[3rd..Last],..,BackTrace*");
     for backtrace in backtraces {
         for c_a in allocation_diffs {
@@ -136,28 +127,31 @@ fn print_allocations(backtraces: &mut Vec<&String>, allocation_diffs: &[Backtrac
     }
 }
 
-fn parse_umdh_files(file_names: &[String]) -> Vec<BacktraceAllocationsMap> {
+fn parse_umdh_files(file_names: &[&Path]) -> Result<Vec<BacktraceAllocationsMap>, Error> {
     let mut backtrace_maps: Vec<BacktraceAllocationsMap> = Vec::new();
 
     for umdh_file in file_names {
-        backtrace_maps.push(parse_umdh_file(umdh_file).unwrap());
+        backtrace_maps.push(parse_umdh_file(umdh_file)?);
     }
 
-    backtrace_maps
+    Ok(backtrace_maps)
 }
 
-fn get_all_backtraces(backtrace_maps: &[BacktraceAllocationsMap]) -> Vec<&String> {
+fn get_all_backtraces(backtrace_maps: &[BacktraceAllocationsMap]) -> Vec<&str> {
     let mut all_backtraces_set: HashSet<&String> = HashSet::new();
     for keys in backtrace_maps.iter() {
         all_backtraces_set.extend(keys.keys());
     }
 
-    // i believe this cloned() is not costly as it is converting from &&String to &String.
-    all_backtraces_set.iter().cloned().collect::<Vec<&String>>()
+    // i believe this cloned() is not costly as it is converting from &&str to &str.
+    all_backtraces_set.iter().map(|s| s.as_str()).collect::<Vec<&str>>()
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).expect("error: unable to read user input");
 
     if args.len() < 3 {
         println!(
@@ -169,7 +163,8 @@ fn main() {
 
     let num_files = args.len() - 1;
 
-    let backtrace_maps = parse_umdh_files(&args[1..]);
+    let file_paths = args[1..].iter().map(|s| Path::new(s.as_str())).collect::<Vec<&Path>>();
+    let backtrace_maps = parse_umdh_files(&file_paths).unwrap();
     let all_backtraces = get_all_backtraces(&backtrace_maps);
     let allocation_diffs = backtrace_maps
         .iter()
@@ -182,13 +177,13 @@ fn main() {
     }
 
     // strictly increasing common allocation counts.
-    let mut leaked_backtraces: Vec<&String> = Vec::new();
+    let mut leaked_backtraces: Vec<&str> = Vec::new();
     // constant common allocation counts.
-    let mut static_backtraces: Vec<&String> = Vec::new();
+    let mut static_backtraces: Vec<&str> = Vec::new();
     // variable allocations - increasing & decreasing with time.
-    let mut variable_backtraces: Vec<&String> = Vec::new();
+    let mut variable_backtraces: Vec<&str> = Vec::new();
 
-    let mut missing_keys: HashMap<&String, usize> = HashMap::new();
+    let mut missing_keys: HashMap<&str, usize> = HashMap::new();
     // get allocation in differet buckets.
     for k in all_backtraces.iter() {
         let mut last_count = 0;
@@ -226,11 +221,15 @@ fn main() {
         }
     }
 
+    sort_by_increasing_count(&mut leaked_backtraces, &allocation_diffs);
+    sort_by_increasing_count(&mut variable_backtraces, &allocation_diffs);
+    sort_by_increasing_count(&mut static_backtraces, &allocation_diffs);
+
     println!("Potential Leaked allocations as these allocations always kept increasing:");
-    print_allocations(&mut leaked_backtraces, &allocation_diffs);
+    print_allocations(&leaked_backtraces, &allocation_diffs);
 
     println!("Variable allocations: [Count increased and decreased with time] / Can be waiting on some workflow like GC to deallocate these");
-    print_allocations(&mut variable_backtraces, &allocation_diffs);
+    print_allocations(&variable_backtraces, &allocation_diffs);
 
     println!("Allocations that never changed address: Sorted by count: [These can be global or leaked allocations]");
     let always_present_allocations = find_common_allocations(
@@ -239,7 +238,7 @@ fn main() {
     );
     let mut always_present_allocations_vec = always_present_allocations
         .keys()
-        .collect::<Vec<&&String>>();
+        .collect::<Vec<&&str>>();
     always_present_allocations_vec.sort_by(|a, b| {
         always_present_allocations[**a]
             .len()
@@ -258,7 +257,7 @@ fn main() {
     }
 
     println!("Static allocations: [Count never changed]");
-    print_allocations(&mut static_backtraces, &allocation_diffs);
+    print_allocations(&static_backtraces, &allocation_diffs);
 
     println!(
         "BackTraces which are definitely not leaking as they were not present in some umdh file"
