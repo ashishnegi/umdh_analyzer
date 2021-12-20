@@ -73,8 +73,8 @@ fn find_common_allocations<'a>(
 
         for bk in backtrace_maps.iter().skip(2) {
             // there is no easy (right?) way to iterate over HashSet and also remove from it;
-            current_set = bk[*k]
-                .intersection(&current_set)
+            current_set = current_set
+                .intersection(&bk[*k])
                 .cloned()
                 .collect::<HashSet<i64>>();
 
@@ -143,15 +143,11 @@ fn get_all_backtraces(backtrace_maps: &[BacktraceAllocationsMap]) -> Vec<&str> {
         all_backtraces_set.extend(keys.keys());
     }
 
-    // i believe this cloned() is not costly as it is converting from &&str to &str.
     all_backtraces_set.iter().map(|s| s.as_str()).collect::<Vec<&str>>()
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).expect("error: unable to read user input");
 
     if args.len() < 3 {
         println!(
